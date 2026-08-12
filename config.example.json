@@ -1,0 +1,28 @@
+{
+  "site_url": "https://www.cheapies.nz/",
+  "feed_url": "https://www.cheapies.nz/deals/feed",
+  "keywords": [
+    "protein",
+    "KFC",
+    "McDonalds",
+    "desk lamp"
+  ],
+  "notify": {
+    "console": true,
+    "desktop": false,
+    "discord": {
+      "enabled": true,
+      "webhook_url": "PASTE-YOUR-DISCORD-WEBHOOK-URL-HERE",
+      "username": "Cheapies"
+    },
+    "email": {
+      "enabled": false,
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "username": "you@example.com",
+      "password": "your-app-password",
+      "from_addr": "you@example.com",
+      "to_addr": "you@example.com"
+    }
+  }
+}

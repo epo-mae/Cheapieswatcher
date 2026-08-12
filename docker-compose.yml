@@ -1,0 +1,19 @@
+services:
+  cheapies-watcher:
+    build: .
+    # Or, once you've pushed this to GitHub, you can skip the local build
+    # and build straight from the repo instead:
+    #   build: https://github.com/epo-mae/Cheapieswatcher.git
+    container_name: cheapies-watcher
+    restart: unless-stopped
+    environment:
+      - INTERVAL_SECONDS=3600          # how often to check (seconds); 3600 = hourly
+      - RUN_DEEP_SCAN_ON_FIRST_RUN=true # do one deep historical sweep the very first time
+      - MAX_PAGES=20
+    volumes:
+      # Your REAL config.json (with the actual webhook URL) and state.json
+      # live on the host, outside git, and get mounted in here. This means
+      # they persist across container rebuilds/restarts and never end up
+      # inside the image itself.
+      - ./data/config.json:/app/data/config.json:ro
+      - ./data/state.json:/app/data/state.json

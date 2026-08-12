@@ -1,0 +1,9 @@
+# Real config (contains your Discord webhook URL / email password) and
+# runtime state — never commit these. Only config.example.json goes in git.
+data/config.json
+data/state.json
+config.json
+state.json
+
+__pycache__/
+*.pyc
