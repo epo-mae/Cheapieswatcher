@@ -9,10 +9,10 @@
   ],
   "notify": {
     "console": true,
-    "desktop": true,
+    "desktop": false,
     "discord": {
       "enabled": true,
-      "webhook_url": "webook",
+      "webhook_url": "PASTE-YOUR-DISCORD-WEBHOOK-URL-HERE",
       "username": "Cheapies"
     },
     "email": {
