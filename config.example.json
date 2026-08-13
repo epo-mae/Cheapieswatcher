@@ -12,7 +12,7 @@
     "desktop": false,
     "discord": {
       "enabled": true,
-      "webhook_url": "PASTE-YOUR-DISCORD-WEBHOOK-URL-HERE",
+      "webhook_url": "https://discord.com/api/webhooks/1537072119035207730/S5KFksix7KqkeKpN1rcKkQo2_bkQTZYJ3gURiCyMqk7Dkjp7Jtf1FiQ4tcoEo37LhgeR",
       "username": "Cheapies"
     },
     "email": {

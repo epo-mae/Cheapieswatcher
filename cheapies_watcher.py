@@ -19,12 +19,14 @@ No third-party packages are required. Desktop notifications will use
 """
 
 import argparse
+import datetime
 import json
 import re
 import smtplib
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+import zoneinfo
 from email.mime.text import MIMEText
 from html import unescape
 from pathlib import Path
@@ -32,6 +34,22 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.json"
 DEFAULT_STATE_PATH = Path(__file__).parent / "state.json"
 USER_AGENT = "Mozilla/5.0 (compatible; CheapiesKeywordWatcher/1.0)"
+
+
+def timestamp() -> str:
+    """Current time in NZT (NZST/NZDT, whichever currently applies) as a
+    friendly string for stamping Discord messages, e.g. '1:23pm, 13 Aug'.
+    Uses the IANA tz database so daylight saving is handled automatically;
+    falls back to a fixed NZST (+12) offset if that data isn't available
+    in the container."""
+    try:
+        nz = datetime.datetime.now(datetime.timezone.utc).astimezone(
+            zoneinfo.ZoneInfo("Pacific/Auckland")
+        )
+    except Exception:
+        nz = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=12)
+    hour12 = nz.strftime("%I").lstrip("0") or "12"
+    return f"{hour12}:{nz.strftime('%M%p').lower()}, {nz.strftime('%d %b')}"
 
 # Matches deal-title links in the listing pages, e.g.
 #   <a href="https://www.cheapies.nz/node/56744">Some Deal Title</a>
@@ -120,6 +138,11 @@ def parse_listing_page(html: str) -> list:
     'description' (covers the summary text, store name, category, etc.
     the listing page shows for each deal).
 
+    cheapies.nz shows a status badge like "expired" or "out of stock"
+    immediately BEFORE the title link (e.g. "## expired [Some Deal](...)"),
+    not after it -- so a short lookbehind window is also scraped and
+    prepended to the description, letting is_unavailable() catch it.
+
     This is a lightweight, dependency-free scraper. It is deliberately
     generic (keyed off /node/<id> links, which are stable identifiers on
     this site) rather than tied to exact CSS classes, since front-end
@@ -141,15 +164,22 @@ def parse_listing_page(html: str) -> list:
         block = html[m.end():block_end]
         description = strip_html(block)[:600]
 
+        # Status badge (expired / out of stock / sold out) sits right
+        # before the link itself on this site, e.g. "expired [Title](...)".
+        lookbehind_start = matches[i - 1].end() if i > 0 else max(0, m.start() - 80)
+        prefix_block = html[lookbehind_start:m.start()]
+        prefix_text = strip_html(prefix_block)[-80:]
+
         items.append(
             {
                 "id": f"node/{node_id}",
                 "title": title,
                 "link": f"https://www.cheapies.nz/node/{node_id}",
-                "description": description,
+                "description": f"{prefix_text} {description}".strip(),
             }
         )
     return items
+
 
 
 def deep_scan(base_url: str, max_pages: int, delay_seconds: float, seen_ids: set):
@@ -196,14 +226,34 @@ def matching_keywords(item: dict, keywords: list) -> list:
     return [kw for kw in keywords if kw.lower() in haystack]
 
 
+# Phrases that mean cheapies.nz has marked a deal as no longer available.
+# Checked against the title and description text scraped/parsed from the
+# site, so deals tagged this way are skipped before they're ever treated
+# as a "match" -- no notification for stuff you can't actually get.
+UNAVAILABLE_PHRASES = [
+    "expired",
+    "out of stock",
+    "sold out",
+    "no longer available",
+]
+
+
+def is_unavailable(item: dict) -> bool:
+    haystack = f"{item['title']} {item.get('description', '')}".lower()
+    return any(phrase in haystack for phrase in UNAVAILABLE_PHRASES)
+
+
 def most_recent_per_keyword(items: list, keywords: list) -> dict:
     """
     For each keyword, return the first (i.e. most recent -- both the RSS
     feed and the listing pages are newest-first) item whose title/
     description contains it. Keywords with no current match are omitted.
+    Skips deals marked expired/out of stock/sold out.
     """
     latest = {}
     for item in items:
+        if is_unavailable(item):
+            continue
         for kw in matching_keywords(item, keywords):
             if kw not in latest:
                 latest[kw] = item
@@ -273,7 +323,7 @@ def alert_discord(new_matches: list, discord_cfg: dict) -> None:
         payload = {
             "username": discord_cfg.get("username", "Cheapies Watcher"),
             "content": (
-                f"**{len(new_matches)} new deal(s) matching your keywords**"
+                f"@here **{len(new_matches)} new deal(s) matching your keywords**\nChecked at: {timestamp()}"
                 if i == 0
                 else None
             ),
@@ -296,33 +346,18 @@ def alert_discord(new_matches: list, discord_cfg: dict) -> None:
 
 
 def alert_discord_heartbeat(discord_cfg: dict, scan_kind: str, items_checked: int, latest: dict = None) -> None:
-    """Send a plain 'ran, found nothing new' ping to Discord, optionally
-    followed by an embed showing the most recent current deal per keyword."""
+    """Send a plain 'ran, found nothing new' ping to Discord."""
     if not discord_cfg.get("enabled"):
         return
     webhook_url = discord_cfg.get("webhook_url")
     if not webhook_url:
         return
 
-    content = f"✅ {scan_kind} ran, checked {items_checked} deal(s), no new keyword matches."
+    content = f"✅ Checked, no matches.\nChecked at: {timestamp()}"
     payload = {
         "username": discord_cfg.get("username", "Cheapies Watcher"),
         "content": content,
     }
-
-    if latest:
-        embeds = []
-        for kw, item in latest.items():
-            embeds.append(
-                {
-                    "title": item["title"][:256],
-                    "url": item["link"],
-                    "description": f"Most recent for: {kw}",
-                }
-            )
-        # Discord caps embeds per message at 10; unlikely to hit that with
-        # a realistic keyword list, but chunk just in case.
-        payload["embeds"] = embeds[:10]
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -438,6 +473,8 @@ def main():
 
     all_matches = []
     for item in items:
+        if is_unavailable(item):
+            continue
         kws = matching_keywords(item, keywords)
         if kws:
             all_matches.append((item, kws))
